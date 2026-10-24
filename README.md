@@ -44,3 +44,38 @@ progress, individual removal and confirmed reset.
 
 This repository does not yet specify a reuse license. Image provenance and
 reuse terms need review before applying a license to those assets.
+
+## Refresh controls and offline play
+
+- Search by state name or abbreviation. Use All, Missing or Found to narrow the cards.
+  A just-found card stays visible in Missing while you read it; flip it back or
+  change the filter/search to refresh the list.
+- Keyboard: Tab to a card, then Enter or Space to find/flip it. On its back,
+  use Remove for the same confirmation as holding a card. Escape closes a popup;
+  focus returns to the opener. Browser zoom and reduced-motion settings are respected.
+- All 31 achievements remain available. Hometown changes update geography awards.
+- Once the page says **Ready for offline play**, the game, facts and 74 local photos
+  can be reopened without the game server. Hometown searches still need internet.
+  Google Fonts is not included in the offline cache; a system font may be used.
+  Browser cache eviction can remove the offline copy. Progress still uses the same
+  local storage keys and origin; it does not sync between devices.
+- Unreadable saved data is kept intact and a warning is shown. Reset All explicitly
+  resets collection/achievement storage, while keeping your hometown.
+
+## Development checks
+
+Node 22 is used in CI. The game itself still needs no build or npm dependencies.
+The npm packages are test tools only.
+
+```sh
+npm ci --ignore-scripts
+npm test
+npm run build:offline
+node scripts/build-offline.cjs --check
+```
+
+Commit the regenerated `sw.js` whenever any cached game file changes. CI rejects a
+stale cache manifest. An update waits until existing game tabs close, so a running
+session does not mix old and new assets. Localhost previews do not install a worker
+unless opened with `?offline-test`; use a fresh preview origin for repeated development.
+See [review notes](docs/refresh-review.md) for the baseline, checks and remaining gaps.
