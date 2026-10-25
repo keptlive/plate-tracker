@@ -2,7 +2,7 @@
 
 A browser road-trip game for spotting license plates from all 50 US states.
 
-[Play the game](https://keptlive.github.io/plate-tracker/)
+[Play the game](https://plates.kept.live)
 
 ## Play
 
@@ -30,7 +30,8 @@ Open http://localhost:8080. Keep the same local origin to retain saved progress.
 
 ## Deployment
 
-The intended GitHub Pages configuration serves the repository root from `main`.
+GitHub Pages serves the repository root from `main` at https://plates.kept.live
+(the custom domain is set in the `CNAME` file and the repository Pages settings).
 All JavaScript, images and state data must be deployed together. The scripts in
 `index.html` load in dependency order.
 
@@ -39,11 +40,6 @@ All JavaScript, images and state data must be deployed together. The scripts in
 All 50 state cards and outlines, state facts and photos, an image lightbox,
 hometown distances, achievements, progress indicators, celebrations, saved
 progress, individual removal and confirmed reset.
-
-## Licensing
-
-This repository does not yet specify a reuse license. Image provenance and
-reuse terms need review before applying a license to those assets.
 
 ## Refresh controls and offline play
 
@@ -79,3 +75,9 @@ stale cache manifest. An update waits until existing game tabs close, so a runni
 session does not mix old and new assets. Localhost previews do not install a worker
 unless opened with `?offline-test`; use a fresh preview origin for repeated development.
 See [review notes](docs/refresh-review.md) for the baseline, checks and remaining gaps.
+
+## License
+
+The code is released under the [MIT License](LICENSE). The photos in `images/` come from
+Wikimedia Commons and keep their own Creative Commons or public-domain licenses
+(see `images/attribution.txt`); the MIT License does not cover them.
