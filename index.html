@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>License Plate Tracker</title>
+<meta name="description" content="Spot all 50 states on your next road trip. Collect license plates, explore state facts, and earn achievements.">
+<meta name="theme-color" content="#0a0a1a">
+
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -228,6 +231,7 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
   .grid { grid-template-columns: repeat(4, 1fr); }
 }
 </style>
+<link rel="stylesheet" href="refresh.css">
 </head>
 <body>
 
@@ -236,9 +240,9 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
 <div class="orb"></div>
 <div class="stars" id="stars"></div>
 
-<div class="container">
+<main class="container" id="mainContent">
   <div class="header">
-    <div class="title">License Plate Tracker</div>
+    <h1 class="title">License Plate Tracker</h1>
     <div class="subtitle">Tap a card when you spot its plate!</div>
   </div>
 
@@ -247,43 +251,59 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
       <span class="progress-label">States Found</span>
       <div class="progress-right">
         <span class="progress-count" id="progressCount">0 / 50</span>
-        <button class="ach-btn" id="achBtn"><span id="achCount">0/33</span></button>
+        <button class="ach-btn" id="achBtn" aria-label="View achievements"><span id="achCount">0/31</span></button>
       </div>
     </div>
-    <div class="progress-bar-bg">
+    <div class="progress-bar-bg" role="progressbar" aria-label="States found" aria-valuemin="0" aria-valuemax="50" aria-valuenow="0" id="progressBar">
       <div class="progress-bar-fill" id="progressFill" style="width: 0%"></div>
     </div>
   </div>
 
   <div class="hometown-bar" id="hometownBar">
     <div class="hometown-input-row" id="hometownInputRow">
-      <input type="text" id="hometownInput" placeholder="Enter your hometown..." autocomplete="off">
+      <input type="text" id="hometownInput" aria-label="Hometown" aria-describedby="hometownHelp hometownStatus" placeholder="Enter your hometown..." autocomplete="off">
       <button class="hometown-go" id="hometownGo">Go</button>
     </div>
     <div class="hometown-display" id="hometownDisplay" style="display:none">
       <span class="hometown-label">Home:</span>
       <span class="hometown-name" id="hometownName"></span>
-      <button class="hometown-edit" id="hometownEditBtn">&#9998;</button>
+      <button class="hometown-edit" id="hometownEditBtn" aria-label="Change hometown">&#9998;</button>
     </div>
   </div>
 
+  <p id="hometownHelp" class="helper">Optional: hometown search uses OpenStreetMap. Distances are approximate straight-line miles.</p>
+  <p id="hometownStatus" class="helper" role="status"></p>
+  <section class="collection-tools" aria-label="Find a state">
+    <label for="stateSearch">Find a state</label>
+    <input type="search" id="stateSearch" placeholder="Name or abbreviation" autocomplete="off" aria-controls="grid">
+    <div class="filter-buttons" role="group" aria-label="Show states">
+      <button type="button" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" data-filter="missing" aria-pressed="false">Missing</button>
+      <button type="button" data-filter="found" aria-pressed="false">Found</button>
+    </div>
+  </section>
+  <p class="helper" id="gameHelp">Tap a card to mark it found and flip it. Tap again to flip back. Hold a found card to remove it, or use its Remove button.</p>
+  <p class="helper" id="filterStatus" role="status"></p>
   <div class="grid" id="grid"></div>
+  <p class="helper" id="emptyState" hidden>No matching states. Try another search or filter.</p>
 
   <div class="achievements-section">
     <div class="ach-section-header">
       <div class="ach-section-title">Achievements</div>
-      <div class="ach-section-count" id="achSectionCount">0 / 33</div>
+      <div class="ach-section-count" id="achSectionCount">0 / 31</div>
     </div>
     <div class="ach-grid" id="achGrid"></div>
   </div>
-</div>
+  <p class="helper" id="saveStatus" role="status">Progress is saved in this browser.</p>
+  <p class="helper" id="offlineStatus" role="status"></p>
+</main>
 
 <div class="bottom-bar">
   <button class="btn-reset" id="resetBtn">Reset All</button>
 </div>
 
 <!-- Confirm modal -->
-<div class="modal-overlay" id="modal">
+<div class="modal-overlay" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalText">
   <div class="modal-box">
     <div class="modal-title" id="modalTitle"></div>
     <div class="modal-text" id="modalText"></div>
@@ -295,21 +315,21 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
 </div>
 
 <!-- Info popup -->
-<div class="info-overlay" id="infoPopup">
+<div class="info-overlay" id="infoPopup" role="dialog" aria-modal="true" aria-label="State information">
   <div class="info-panel">
     <div class="info-panel-top">
-      <button class="info-close" id="infoClose">&times;</button>
+      <button class="info-close" id="infoClose" aria-label="Close state information">&times;</button>
     </div>
     <div class="info-body"></div>
   </div>
 </div>
 
 <!-- Achievement panel -->
-<div class="ach-overlay" id="achPanel">
+<div class="ach-overlay" id="achPanel" role="dialog" aria-modal="true" aria-label="Achievements">
   <div class="ach-panel">
     <div class="ach-panel-top">
       <div class="ach-panel-title">Achievements</div>
-      <button class="info-close" id="achPanelClose">&times;</button>
+      <button class="info-close" id="achPanelClose" aria-label="Close achievements">&times;</button>
     </div>
     <div class="ach-body"></div>
   </div>
@@ -317,8 +337,8 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
 
 
 <!-- Image lightbox -->
-<div class="lightbox" id="lightbox">
-  <button class="lightbox-close" id="lightboxClose">&times;</button>
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Enlarged photo">
+  <button class="lightbox-close" id="lightboxClose" aria-label="Close photo">&times;</button>
   <img src="" alt="">
   <div class="lightbox-label"></div>
 </div>
@@ -330,5 +350,6 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
 <script src="facts.js"></script>
 <script src="achievements.js"></script>
 <script src="app.js"></script>
+<script src="offline.js"></script>
 </body>
 </html>

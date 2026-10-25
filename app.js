@@ -2,11 +2,89 @@
 const STORAGE_KEY = 'plateTracker';
 const ACH_KEY = 'plateTrackerAch';
 const HOME_KEY = 'plateTrackerHome';
-let checked = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'));
-let unlockedAch = new Set(JSON.parse(localStorage.getItem(ACH_KEY) || '[]'));
-let userOrigin = JSON.parse(localStorage.getItem(HOME_KEY) || 'null');
+const storageProblems = new Set();
+function readStored(key, fallback, validate) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    const value = JSON.parse(raw);
+    if (!validate(value)) throw new Error('Invalid saved data');
+    return value;
+  } catch (error) { storageProblems.add(key); return fallback; }
+}
+function writeStored(key, value) {
+  // Keep unreadable original data intact until the player explicitly resets it.
+  if (storageProblems.has(key)) { reportStorage(); return; }
+  try { localStorage.setItem(key, JSON.stringify(value)); }
+  catch (error) { storageProblems.add(key); }
+  reportStorage();
+}
+function reportStorage() {
+  document.getElementById('saveStatus').textContent = storageProblems.size
+    ? 'Saved data could not be read or updated. You can keep playing, but changes may not survive closing this page. Existing saved data has been kept.'
+    : 'Progress is saved in this browser.';
+}
+const stateCodes = new Set(STATES.map(s => s.abbr));
+const achievementIds = new Set(ACHIEVEMENTS.map(a => a.id));
+const validList = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+const validHome = value => value === null || (typeof value === 'object' && typeof value.name === 'string' && value.name.length <= 300 && Number.isFinite(value.lat) && Math.abs(value.lat) <= 90 && Number.isFinite(value.lon) && Math.abs(value.lon) <= 180);
+let checked = new Set(readStored(STORAGE_KEY, [], validList).filter(code => stateCodes.has(code)));
+let unlockedAch = new Set(readStored(ACH_KEY, [], validList).filter(id => achievementIds.has(id)));
+let userOrigin = readStored(HOME_KEY, null, validHome);
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let stateFilter = 'all';
+let pendingFilterRefresh = false;
+// Dialog stack handles nested photo views, background isolation and return focus.
+const dialogStack = [];
+let queuedAchievements = [];
+function syncDialogs() {
+  const top = dialogStack.at(-1)?.element;
+  document.getElementById('mainContent').inert = !!top;
+  document.querySelector('.bottom-bar').inert = !!top;
+  document.body.style.overflow = top ? 'hidden' : '';
+  for (const item of dialogStack) item.element.inert = item.element !== top;
+}
+function openDialog(element, preferred) {
+  if (dialogStack.some(item => item.element === element)) return;
+  dialogStack.push({element, opener: document.activeElement});
+  element.classList.add('active');
+  syncDialogs();
+  (preferred || element.querySelector('button')).focus();
+}
+function closeDialog(element) {
+  if (dialogStack.at(-1)?.element !== element) return;
+  const {opener} = dialogStack.pop();
+  element.classList.remove('active');
+  element.inert = false;
+  syncDialogs();
+  if (opener?.isConnected) opener.focus();
+  if (!dialogStack.length && queuedAchievements.length) {
+    const pending = queuedAchievements;
+    queuedAchievements = [];
+    setTimeout(() => showAchievementPopup(pending.filter(a => a.test(checked, STATES, userOrigin))), 0);
+  }
+  if (!dialogStack.length && pendingFilterRefresh) {
+    pendingFilterRefresh = false;
+    applyFilters();
+  }
+}
+document.addEventListener('keydown', event => {
+  const top = dialogStack.at(-1)?.element;
+  if (!top) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    if (top.id === 'modal') dismissModal();
+    else if (top.id === 'lightbox') closeLightbox();
+    else closeDialog(top);
+  } else if (event.key === 'Tab') {
+    const controls = [...top.querySelectorAll('button, input, [tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
+    if (!controls.length) return;
+    const index = controls.indexOf(document.activeElement);
+    if (event.shiftKey && index <= 0) { event.preventDefault(); controls.at(-1).focus(); }
+    else if (!event.shiftKey && (index < 0 || index === controls.length - 1)) { event.preventDefault(); controls[0].focus(); }
+  }
+});
 let isAnimating = {};
-let longPressTimer = null;
 let modalCallback = null;
 let svgBoxes = {};
 
@@ -64,21 +142,23 @@ STATES.forEach(st => {
   const wrapper = document.createElement('div');
   wrapper.className = 'card-wrapper' + (isChecked ? ' checked' : '');
   wrapper.dataset.abbr = st.abbr;
+  wrapper.setAttribute('role', 'group');
+  wrapper.setAttribute('aria-label', st.name);
 
   const svgData = svgBoxes[st.abbr] || { vb: '0 0 100 100', sw: 2 };
   const svgMarkup = STATE_PATHS[st.abbr]
-    ? `<svg class="state-outline" viewBox="${svgData.vb}" preserveAspectRatio="xMidYMid meet"><path d="${STATE_PATHS[st.abbr]}" style="stroke-width:${svgData.sw}"/></svg>`
+    ? `<svg aria-hidden="true" class="state-outline" viewBox="${svgData.vb}" preserveAspectRatio="xMidYMid meet"><path d="${STATE_PATHS[st.abbr]}" style="stroke-width:${svgData.sw}"/></svg>`
     : '';
 
   wrapper.innerHTML = `
     <div class="card">
-      <div class="card-face card-front">
+      <div class="card-face card-front" role="button" tabindex="0" aria-label="${st.name}: ${isChecked ? 'found; show facts' : 'mark as found'}" aria-pressed="${isChecked}">
         <span class="found-badge">\u2713 Found</span>
         <div class="card-abbr">${st.abbr}</div>
         <div class="card-name">${st.name}</div>
         ${svgMarkup}
       </div>
-      <div class="card-face card-back">
+      <div class="card-face card-back" aria-hidden="true" inert>
         ${svgMarkup}
         <div class="back-title">${st.name}</div>
         <div class="fact-row"><span class="fact-icon">\u{1F3DB}</span><div><div class="fact-label">Capital</div><div class="fact-text">${st.capital}</div></div></div>
@@ -86,69 +166,84 @@ STATES.forEach(st => {
         <div class="fact-row"><span class="fact-icon">\u{1F43E}</span><div><div class="fact-label">Animal</div><div class="fact-text">${st.animal}</div></div></div>
         <div class="fact-row"><span class="fact-icon">\u{1F33C}</span><div><div class="fact-label">Flower</div><div class="fact-text">${st.flower}</div></div></div>
         <div class="fact-row"><span class="fact-icon">\u{1F4CD}</span><div><div class="fact-label">Distance</div><div class="fact-text dist-label">${getDistLabel(st)}</div></div></div>
-        <button class="info-btn" data-abbr="${st.abbr}">i</button>
+        <button class="remove-btn" aria-label="Remove ${st.name}">Remove</button>
+        <button class="info-btn" data-abbr="${st.abbr}" aria-label="More about ${st.name}">i</button>
       </div>
     </div>`;
 
-  // Touch / click handling
+  // Click activation works with touch, mouse and keyboard without pointerup
+  // accidentally marking a state while the user scrolls the collection.
   let didLongPress = false;
-
-  function onPointerDown(e) {
-    didLongPress = false;
-    if (checked.has(st.abbr)) {
-      longPressTimer = setTimeout(() => {
-        didLongPress = true;
-        showModal('Remove License Plate', `Remove ${st.name} from your found list?`, () => {
-          checked.delete(st.abbr);
-          save();
-          wrapper.classList.remove('checked');
-          const card = wrapper.querySelector('.card');
-          if (card.classList.contains('flipped')) card.classList.remove('flipped');
-          updateProgress();
-          recheckAchievements();
-        }, 'Remove License Plate');
-      }, 600);
-    }
-  }
-
-  function onPointerUp(e) {
-    clearTimeout(longPressTimer);
-    if (didLongPress) return;
-    if (e.target.closest('.info-btn')) return; // handled separately
-    if (isAnimating[st.abbr]) return;
-
-    const card = wrapper.querySelector('.card');
-    if (card.classList.contains('flipped')) {
-      flipWithLock(card, st.abbr, false);
-      return;
-    }
-    flipWithLock(card, st.abbr, true);
-
-    if (!checked.has(st.abbr)) {
-      checked.add(st.abbr);
+  let startPoint = null;
+  let moved = false;
+  let pressTimer;
+  const front = wrapper.querySelector('.card-front');
+  const back = wrapper.querySelector('.card-back');
+  function removePlate() {
+    showModal('Remove License Plate', `Remove ${st.name} from your found list?`, () => {
+      checked.delete(st.abbr);
+      wrapper.classList.remove('checked', 'raised');
+      wrapper.querySelector('.card').classList.remove('flipped');
+      syncCardFaces(wrapper);
+      recheckAchievements();
       save();
+      updateProgress();
+      applyFilters();
+    }, 'Remove License Plate');
+  }
+  function activate() {
+    if (isAnimating[st.abbr]) return;
+    const card = wrapper.querySelector('.card');
+    const toBack = !card.classList.contains('flipped');
+    if (toBack && !checked.has(st.abbr)) {
+      checked.add(st.abbr);
       wrapper.classList.add('checked');
+      save();
       updateProgress();
       spawnMiniConfetti(wrapper);
-      checkNewAchievements();
     }
+    flipWithLock(card, st.abbr, toBack);
+    checkNewAchievements();
+    // Keep the just-found facts visible until a Missing filter is used again.
+    if (!toBack) applyFilters();
+    updateFilterStatus();
   }
-
-  function onPointerLeave() { clearTimeout(longPressTimer); }
-
-  wrapper.addEventListener('pointerdown', onPointerDown);
-  wrapper.addEventListener('pointerup', onPointerUp);
-  wrapper.addEventListener('pointerleave', onPointerLeave);
-  wrapper.addEventListener('pointercancel', onPointerLeave);
-  wrapper.addEventListener('contextmenu', e => e.preventDefault());
-
-  // Info button handler — use click (more reliable on mobile with 3D transforms)
-  wrapper.querySelector('.info-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    clearTimeout(longPressTimer);
-    showInfoPopup(st.abbr);
+  wrapper.addEventListener('pointerdown', e => {
+    if (e.isPrimary === false || e.button !== 0 || e.target.closest('button')) return;
+    didLongPress = false;
+    moved = false;
+    startPoint = [e.clientX, e.clientY];
+    if (checked.has(st.abbr)) pressTimer = setTimeout(() => {
+      didLongPress = true;
+      (wrapper.querySelector('.card.flipped') ? back : front).focus();
+      removePlate();
+    }, 600);
   });
+  wrapper.addEventListener('pointermove', e => {
+    if (startPoint && Math.hypot(e.clientX - startPoint[0], e.clientY - startPoint[1]) > 10) {
+      moved = true;
+      clearTimeout(pressTimer);
+    }
+  });
+  for (const type of ['pointerup', 'pointerleave', 'pointercancel']) wrapper.addEventListener(type, () => {
+    clearTimeout(pressTimer);
+    startPoint = null;
+  });
+  wrapper.addEventListener('pointercancel', () => { moved = true; });
+  wrapper.addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    if (didLongPress || moved) { didLongPress = false; moved = false; return; }
+    activate();
+  });
+  wrapper.addEventListener('contextmenu', e => e.preventDefault());
+  for (const face of [front, back]) face.addEventListener('keydown', e => {
+    if (e.target !== face) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+  });
+  back.tabIndex = -1;
+  back.setAttribute('aria-label', `${st.name} facts. Press Enter to flip back.`);
+  wrapper.querySelector('.remove-btn').addEventListener('click', removePlate);
+  wrapper.querySelector('.info-btn').addEventListener('click', () => showInfoPopup(st.abbr));
 
   grid.appendChild(wrapper);
 });
@@ -163,19 +258,62 @@ function flipWithLock(card, abbr, toBack) {
     card.classList.remove('flipped');
     setTimeout(() => { wrapper.classList.remove('raised'); }, 600);
   }
-  setTimeout(() => { isAnimating[abbr] = false; }, 600);
+  syncCardFaces(wrapper);
+  setTimeout(() => { isAnimating[abbr] = false; }, reducedMotion() ? 0 : 600);
 }
+
+function syncCardFaces(wrapper) {
+  const front = wrapper.querySelector('.card-front');
+  const back = wrapper.querySelector('.card-back');
+  const flipped = wrapper.querySelector('.card').classList.contains('flipped');
+  const focusWasInside = wrapper.contains(document.activeElement);
+  front.inert = flipped;
+  front.setAttribute('aria-hidden', String(flipped));
+  front.tabIndex = flipped ? -1 : 0;
+  back.inert = !flipped;
+  back.setAttribute('aria-hidden', String(!flipped));
+  back.tabIndex = flipped ? 0 : -1;
+  const st = STATES.find(s => s.abbr === wrapper.dataset.abbr);
+  front.setAttribute('aria-label', `${st.name}: ${checked.has(st.abbr) ? 'found; show facts' : 'mark as found'}`);
+  front.setAttribute('aria-pressed', String(checked.has(st.abbr)));
+  if (focusWasInside) (flipped ? back : front).focus();
+}
+function updateFilterStatus() {
+  const visible = [...grid.children].filter(el => !el.hidden).length;
+  document.getElementById('filterStatus').textContent = `${visible} states shown / ${50 - checked.size} left to find`;
+}
+function applyFilters() {
+  if (dialogStack.length) { pendingFilterRefresh = true; return; }
+  const query = document.getElementById('stateSearch').value.trim().toLowerCase();
+  for (const wrapper of grid.children) {
+    const st = STATES.find(s => s.abbr === wrapper.dataset.abbr);
+    const match = (st.name.toLowerCase().includes(query) || st.abbr.toLowerCase().includes(query)) &&
+      (stateFilter === 'all' || (stateFilter === 'found') === checked.has(st.abbr));
+    if (!match && wrapper.contains(document.activeElement)) document.getElementById('stateSearch').focus();
+    wrapper.hidden = !match;
+  }
+  document.getElementById('emptyState').hidden = [...grid.children].some(el => !el.hidden);
+  updateFilterStatus();
+}
+document.getElementById('stateSearch').addEventListener('input', applyFilters);
+document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
+  stateFilter = button.dataset.filter;
+  document.querySelectorAll('[data-filter]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+  applyFilters();
+}));
 
 // === PERSISTENCE ===
 function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...checked]));
-  localStorage.setItem(ACH_KEY, JSON.stringify([...unlockedAch]));
+  writeStored(STORAGE_KEY, [...checked]);
+  writeStored(ACH_KEY, [...unlockedAch]);
 }
 
 function updateProgress() {
   const count = checked.size;
   document.getElementById('progressCount').textContent = `${count} / 50`;
   document.getElementById('progressFill').style.width = (count / 50 * 100) + '%';
+  document.getElementById('progressBar').setAttribute('aria-valuenow', count);
+  document.getElementById('achBtn').setAttribute('aria-label', `View achievements: ${unlockedAch.size} of ${ACHIEVEMENTS.length} unlocked`);
   document.getElementById('achCount').textContent = `${unlockedAch.size}/${ACHIEVEMENTS.length}`;
 }
 
@@ -222,10 +360,15 @@ function showInfoPopup(abbr) {
     </div>`;
 
   popup.querySelector('.info-body').innerHTML = html;
-  popup.classList.add('active');
+  popup.setAttribute('aria-label', `${st.name} information`);
+  openDialog(popup);
 
   // Wire up image click → lightbox
   popup.querySelectorAll('.info-img').forEach(img => {
+    img.tabIndex = 0;
+    img.setAttribute('role', 'button');
+    img.setAttribute('aria-label', `Enlarge ${img.alt} photo`);
+    img.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox(img.src, img.alt); } });
     img.addEventListener('click', (e) => {
       e.stopPropagation();
       openLightbox(img.src, img.alt);
@@ -239,11 +382,12 @@ const lightboxEl = document.getElementById('lightbox');
 function openLightbox(src, label) {
   lightboxEl.querySelector('img').src = src;
   lightboxEl.querySelector('.lightbox-label').textContent = label;
-  lightboxEl.classList.add('active');
+  lightboxEl.querySelector('img').alt = label;
+  openDialog(lightboxEl);
 }
 
 function closeLightbox() {
-  lightboxEl.classList.remove('active');
+  closeDialog(lightboxEl);
   lightboxEl.querySelector('img').src = '';
 }
 
@@ -257,10 +401,10 @@ lightboxEl.addEventListener('click', (e) => {
 });
 
 document.getElementById('infoClose').addEventListener('click', () => {
-  document.getElementById('infoPopup').classList.remove('active');
+  closeDialog(document.getElementById('infoPopup'));
 });
 document.getElementById('infoPopup').addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) e.currentTarget.classList.remove('active');
+  if (e.target === e.currentTarget) closeDialog(e.currentTarget);
 });
 
 // === ACHIEVEMENT SYSTEM ===
@@ -297,6 +441,10 @@ function recheckAchievements() {
 // Achievement popup — reuses the existing modal system
 function showAchievementPopup(achievements) {
   if (achievements.length === 0) return;
+  if (dialogStack.length) {
+    queuedAchievements = [...new Map([...queuedAchievements, ...achievements].map(a => [a.id, a])).values()];
+    return;
+  }
   const box = document.querySelector('.modal-box');
   const titleEl = document.getElementById('modalTitle');
   const textEl = document.getElementById('modalText');
@@ -327,15 +475,14 @@ function showAchievementPopup(achievements) {
     confirmBtn.textContent = 'Yes';
     confirmBtn.style.background = '';
   };
-  document.getElementById('modal').classList.add('active');
-  modalOpenedAt = Date.now();
+  openDialog(document.getElementById('modal'), document.getElementById('modalCancel').style.display === 'none' ? document.getElementById('modalConfirm') : document.getElementById('modalCancel'));
   spawnFireworks();
 }
 
 // Achievement panel
 document.getElementById('achBtn').addEventListener('click', showAchievementPanel);
 document.getElementById('achPanelClose').addEventListener('click', () => {
-  document.getElementById('achPanel').classList.remove('active');
+  closeDialog(document.getElementById('achPanel'));
 });
 
 function showAchievementPanel() {
@@ -361,61 +508,60 @@ function showAchievementPanel() {
   });
 
   body.innerHTML = html;
-  panel.classList.add('active');
+  openDialog(panel);
 }
 
 // === MODAL ===
-let modalOpenedAt = 0;
 
 function showModal(title, text, onConfirm, confirmLabel) {
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalText').textContent = text;
   document.getElementById('modalConfirm').textContent = confirmLabel || 'Yes';
   modalCallback = onConfirm;
-  document.getElementById('modal').classList.add('active');
-  modalOpenedAt = Date.now();
+  openDialog(document.getElementById('modal'), document.getElementById('modalCancel').style.display === 'none' ? document.getElementById('modalConfirm') : document.getElementById('modalCancel'));
 }
 
 function closeModal() {
-  // Ignore clicks within 400ms of opening (blocks synthetic click from card tap)
-  if (Date.now() - modalOpenedAt < 400) return;
-  document.getElementById('modal').classList.remove('active');
+  closeDialog(document.getElementById('modal'));
+  document.querySelector('.modal-box').classList.remove('ach');
+  document.getElementById('modalTitle').classList.remove('ach');
+  document.getElementById('modalCancel').style.display = '';
+  document.getElementById('modalConfirm').style.background = '';
 }
-
-document.getElementById('modalCancel').addEventListener('click', () => {
-  closeModal();
-  modalCallback = null;
-});
+function dismissModal() { closeModal(); modalCallback = null; }
+document.getElementById('modalCancel').addEventListener('click', dismissModal);
 document.getElementById('modalConfirm').addEventListener('click', () => {
-  closeModal();
-  if (modalCallback) modalCallback();
+  const callback = modalCallback;
   modalCallback = null;
+  closeModal();
+  if (callback) callback();
 });
-document.getElementById('modal').addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) {
-    closeModal();
-    modalCallback = null;
-  }
-});
+document.getElementById('modal').addEventListener('click', e => { if (e.target === e.currentTarget) dismissModal(); });
+document.getElementById('achPanel').addEventListener('click', e => { if (e.target === e.currentTarget) closeDialog(e.currentTarget); });
 
 // === RESET ===
 document.getElementById('resetBtn').addEventListener('click', () => {
-  if (checked.size === 0) return;
+  if (checked.size === 0 && !storageProblems.has(STORAGE_KEY) && !storageProblems.has(ACH_KEY)) return;
   showModal('Reset All?', 'This will clear all your found states and achievements. Are you sure?', () => {
+    storageProblems.delete(STORAGE_KEY);
+    storageProblems.delete(ACH_KEY);
     checked.clear();
     unlockedAch.clear();
     save();
     document.querySelectorAll('.card-wrapper').forEach(w => {
-      w.classList.remove('checked');
+      w.classList.remove('checked', 'raised');
       w.querySelector('.card').classList.remove('flipped');
+      syncCardFaces(w);
     });
     updateProgress();
     renderAchievementSection();
+    applyFilters();
   });
 });
 
 // === MINI CONFETTI (per state found) ===
 function spawnMiniConfetti(el) {
+  if (reducedMotion()) return;
   const rect = el.getBoundingClientRect();
   const cx = rect.left + rect.width / 2;
   const cy = rect.top + rect.height / 2;
@@ -448,6 +594,7 @@ function spawnMiniConfetti(el) {
 
 // === CONFETTI + FIREWORKS ===
 function spawnConfetti() {
+  if (reducedMotion()) return;
   const colors = ['#ffd200','#ff6b35','#ff6b6b','#667eea','#764ba2','#4ecdc4','#96c93d','#f093fb'];
   for (let i = 0; i < 80; i++) {
     const c = document.createElement('div');
@@ -470,6 +617,7 @@ function spawnConfetti() {
 }
 
 function spawnFireworks() {
+  if (reducedMotion()) return;
   spawnConfetti();
   // Canvas fireworks burst
   let canvas = document.getElementById('fwCanvas');
@@ -571,16 +719,21 @@ function initHometown() {
 
   async function geocode() {
     const q = input.value.trim();
-    if (!q) return;
+    if (!q || goBtn.disabled) return;
+    const status = document.getElementById('hometownStatus');
+    status.textContent = 'Looking up hometown...';
     goBtn.textContent = '...';
     goBtn.disabled = true;
+    const controller = new AbortController();
+    const lookupTimeout = setTimeout(() => controller.abort(), 10000);
     try {
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&format=json&limit=1&addressdetails=1`;
-      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
+      if (!res.ok) throw new Error('Lookup unavailable');
       const data = await res.json();
+      if (!Array.isArray(data)) throw new Error('Invalid response');
       if (!data.length) {
-        input.value = '';
-        input.placeholder = 'City not found, try again...';
+        status.textContent = 'No hometown found. Try a city and state.';
         return;
       }
       const place = data[0];
@@ -588,15 +741,22 @@ function initHometown() {
       const city = addr.city || addr.town || addr.village || addr.hamlet || place.display_name.split(',')[0];
       const stateAbbr = STATE_NAME_TO_ABBR[addr.state || ''] || '';
       const zip = addr.postcode || '';
-      const homeName = stateAbbr && zip ? `${city}, ${stateAbbr} ${zip}` : city;
-      userOrigin = { name: homeName, lat: parseFloat(place.lat), lon: parseFloat(place.lon) };
-      localStorage.setItem(HOME_KEY, JSON.stringify(userOrigin));
+      const homeName = stateAbbr ? `${city}, ${stateAbbr}${zip ? ' ' + zip : ''}` : city;
+      const candidate = { name: homeName, lat: parseFloat(place.lat), lon: parseFloat(place.lon) };
+      if (!validHome(candidate)) throw new Error('Invalid location');
+      userOrigin = candidate;
+      storageProblems.delete(HOME_KEY);
+      writeStored(HOME_KEY, userOrigin);
       showSet();
       updateAllDistances();
+      status.textContent = 'Hometown updated. Distances are straight-line estimates, not driving distances.';
+      editBtn.focus();
       recheckAchievements();
+      checkNewAchievements();
     } catch(e) {
-      input.placeholder = 'Error, try again...';
+      status.textContent = 'Hometown lookup is unavailable. Keep playing and try again when connected.';
     } finally {
+      clearTimeout(lookupTimeout);
       goBtn.textContent = 'Go';
       goBtn.disabled = false;
     }
@@ -648,6 +808,8 @@ function renderAchievementSection() {
 
 // === INIT ===
 initHometown();
+recheckAchievements();
+applyFilters();
 updateProgress();
 // Detect achievements that qualify but were never shown (e.g. earned before code update or between sessions)
 const initNew = [];
@@ -662,5 +824,5 @@ updateProgress();
 renderAchievementSection();
 // Show popups for any achievements earned but never notified
 if (initNew.length > 0) {
-  setTimeout(() => showAchievementPopup(initNew), 500);
+  setTimeout(() => showAchievementPopup(initNew.filter(a => a.test(checked, STATES, userOrigin))), 500);
 }
