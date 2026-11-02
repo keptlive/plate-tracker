@@ -1,0 +1,42 @@
+/* Refinements keep the original glass-card design and all existing views. */
+[hidden] { display: none !important; }
+h1 { margin: 0; }
+.helper { color: #bdc2d6; font-size: .82rem; line-height: 1.5; margin: 10px 0; }
+.helper:empty { display: none; }
+.collection-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 22px; }
+.collection-tools label { font-size: .9rem; font-weight: 600; }
+.collection-tools input { flex: 1; min-width: 140px; }
+.collection-tools input, .filter-buttons button { font: inherit; color: #fff; background: #25253c; border: 1px solid #64647c; border-radius: 12px; padding: 10px 12px; }
+.filter-buttons { display: flex; gap: 6px; }
+.filter-buttons button { cursor: pointer; min-height: 44px; }
+.filter-buttons button[aria-pressed=true] { color: #161523; background: #ffd200; border-color: #ffd200; }
+button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 3px solid #ffd200 !important; outline-offset: 4px; }
+.card-wrapper { aspect-ratio: auto !important; height: 280px; }
+.card-front .card-name { color: #c3c7da; font-size: .8rem; }
+.card-front .state-outline { max-height: 165px; }
+.card-back { padding-bottom: 48px; }
+.card-back .fact-text { font-size: .8rem; }
+.card-back .fact-label { font-size: .65rem; color: #b8bfd4; }
+.card-back .back-title { font-size: .85rem; }
+.card-back .fact-row { margin-bottom: 5px; }
+.card-back .info-btn { min-width: 44px; height: 44px; bottom: 1px; right: 2px; }
+.remove-btn { position: absolute; bottom: 5px; left: 6px; min-height: 44px; padding: 6px; border-radius: 8px; border: 1px solid #8e586d; color: #ffbdc9; background: #392637; font: inherit; font-size: .65rem; cursor: pointer; }
+.found-badge { font-size: .65rem; }
+.info-close, .lightbox-close, .hometown-edit, .ach-btn, .hometown-go, .modal-btn { min-width: 44px; min-height: 44px; }
+.hometown-input-row input { min-width: 0; font-size: 1rem; }
+.hometown-name { overflow-wrap: anywhere; }
+.ach-card.locked, .ach-item.locked { opacity: 1; }
+.ach-card-desc, .ach-desc, .info-detail, .info-related, .info-nickname, .modal-text { color: #bdc2d6; }
+.ach-card-name { white-space: normal; }
+.modal-box { max-height: 90dvh; overflow-y: auto; }
+@media (max-width: 700px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 520px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .collection-tools input { width: 100%; }
+  .filter-buttons { width: 100%; }
+  .filter-buttons button { flex: 1; }
+  .card-wrapper { height: 300px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
